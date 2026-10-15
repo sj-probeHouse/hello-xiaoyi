@@ -55,6 +55,9 @@ class FakeSystem:
     def stop(self):
         pass
 
+    def is_speaking(self):
+        return True
+
 
 @pytest.fixture
 def desktop(qapp, monkeypatch):
@@ -249,3 +252,50 @@ def test_unpinned_inactive_card_hides_on_foreground_switch(desktop, monkeypatch)
     desktop.card.pin.setChecked(True)
     desktop._watch_foreground()
     assert desktop.card.isVisible()
+
+
+@pytest.mark.parametrize("backend", ["online", "system"])
+def test_repeated_read_request_does_not_interrupt_current_audio(desktop, monkeypatch, backend):
+    desktop.card.present("First sentence. Second sentence.", QPoint(10, 10))
+    settings = replace(Settings(), speech_backend=backend)
+    desktop.speak(desktop.card.text, settings)
+    token = desktop.audio_token
+    submitted = len(desktop.runner.submitted)
+    stops = []
+    monkeypatch.setattr(desktop.player, "stop", lambda: stops.append(True))
+    desktop.speak(desktop.card.text, settings)
+    assert desktop.audio_token == token
+    assert len(desktop.runner.submitted) == submitted
+    assert not stops
+    assert not desktop.card.speak.isEnabled()
+    desktop.stop_audio()
+    assert desktop.card.speak.isEnabled()
+
+
+def test_playback_completion_and_unexpected_stop_are_visible(desktop):
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    desktop.card.present("First sentence. Second sentence.", QPoint(10, 10))
+    desktop.speak(desktop.card.text, Settings())
+    desktop._media_status(QMediaPlayer.MediaStatus.EndOfMedia)
+    assert desktop.card.speak.isEnabled()
+    assert desktop.card.status.text() == "朗读完成。"
+    desktop.speak(desktop.card.text, Settings())
+    desktop._playback_state(QMediaPlayer.PlaybackState.StoppedState)
+    assert desktop.card.speak.isEnabled()
+    assert "中断" in desktop.card.status.text()
+
+
+def test_passive_card_hide_keeps_audio_until_explicit_stop(desktop, monkeypatch):
+    desktop.card.present("First sentence. Second sentence.", QPoint(10, 10))
+    desktop.speak(desktop.card.text, Settings())
+    token = desktop.audio_token
+    desktop.source_window = 101
+    monkeypatch.setattr("xiaoyi.app.foreground", lambda: 202)
+    monkeypatch.setattr("xiaoyi.app.process_id", lambda _: 999999)
+    desktop._watch_foreground()
+    assert not desktop.card.isVisible()
+    assert desktop.audio_token == token
+    assert "speech" not in desktop.runner.cancelled[-1:]
+    desktop.escape()
+    assert desktop.audio_token != token
