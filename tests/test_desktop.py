@@ -235,3 +235,17 @@ def test_async_runner_cancels_old_tasks_and_reports_errors(qapp):
     finally:
         runner.stop()
     assert not runner.thread.is_alive()
+
+
+def test_unpinned_inactive_card_hides_on_foreground_switch(desktop, monkeypatch):
+    desktop.source_window = 101
+    desktop.card.present("word", QPoint(10, 10))
+    monkeypatch.setattr("xiaoyi.app.foreground", lambda: 202)
+    monkeypatch.setattr("xiaoyi.app.process_id", lambda _: 999999)
+    desktop._watch_foreground()
+    assert not desktop.card.isVisible()
+    desktop.source_window = 101
+    desktop.card.present("word", QPoint(10, 10))
+    desktop.card.pin.setChecked(True)
+    desktop._watch_foreground()
+    assert desktop.card.isVisible()
