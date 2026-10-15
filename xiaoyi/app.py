@@ -32,6 +32,7 @@ class Desktop:
         self.audio_token = 0
         self.test_token = 0
         self.capture_token = 0
+        self.source_window = 0
         self.translation_started = 0.0
         self.audio_started = 0.0
         self.shutting_down = False
@@ -69,9 +70,24 @@ class Desktop:
         self.hook = KeyboardHook()
         self.hook.triggered.connect(self.capture)
         self.hook.failed.connect(self._hook_error)
-        self.hook.escape_pressed.connect(self.card.close)
+        self.hook.escape_pressed.connect(self.escape)
         self.hook.start()
+        self.foreground_timer = QTimer(self.card)
+        self.foreground_timer.setInterval(150)
+        self.foreground_timer.timeout.connect(self._watch_foreground)
+        self.foreground_timer.start()
         app.aboutToQuit.connect(self.shutdown)
+
+    def _watch_foreground(self) -> None:
+        if not self.card.isVisible() or self.card.pin.isChecked() or not self.source_window:
+            return
+        current = foreground()
+        if current and current != self.source_window and process_id(current) != os.getpid():
+            self.card.close()
+
+    def escape(self) -> None:
+        self.capture_token += 1
+        self.card.close()
 
     def _tray_activated(self, reason) -> None:
         if reason in (
@@ -163,6 +179,7 @@ class Desktop:
                 except ValueError as exc:
                     self.notify(str(exc))
                     return
+                self.source_window = baseline[1]
                 self.card.present(text, point)
                 self.translate(text)
                 return
@@ -177,6 +194,7 @@ class Desktop:
         if not text:
             return
         self.translation_token += 1
+        self.runner.cancel("translation")
         token = self.translation_token
         settings = replace(self.settings)
         self.card.result = ""
@@ -310,6 +328,7 @@ class Desktop:
         if self.shutting_down:
             return
         self.shutting_down = True
+        self.foreground_timer.stop()
         self.hook.stop()
         self.stop_audio()
         self.runner.stop()
