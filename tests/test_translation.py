@@ -83,7 +83,9 @@ def test_explicit_connection_test_bypasses_cached_translation():
             service = TranslationService(client)
             await service.translate("attention", Settings(), "key", lambda _: None)
             with pytest.raises(ServiceError, match="认证"):
-                await service.translate("attention", Settings(), "key", lambda _: None, use_cache=False)
+                await service.translate(
+                    "attention", Settings(), "key", lambda _: None, use_cache=False
+                )
             assert len(calls) == 2
 
     asyncio.run(run())

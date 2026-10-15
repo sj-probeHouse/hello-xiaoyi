@@ -25,8 +25,13 @@ class TranslationService:
         self.cache: OrderedDict[tuple, str] = OrderedDict()
 
     async def translate(
-        self, text: str, settings: Settings, key: str, emit: Callable[[str], None],
-        *, use_cache: bool = True,
+        self,
+        text: str,
+        settings: Settings,
+        key: str,
+        emit: Callable[[str], None],
+        *,
+        use_cache: bool = True,
     ) -> str:
         if not key:
             raise ServiceError("尚未配置 API 密钥，请打开设置填写并测试连接。")

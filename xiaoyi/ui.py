@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 from PySide6.QtCore import QEvent, QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -56,9 +56,14 @@ def app_icon() -> QIcon:
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QColor("#206957"))
     painter.drawRoundedRect(3, 3, 58, 58, 16, 16)
-    painter.setPen(QColor("#f4f6df"))
-    painter.setFont(QFont("Microsoft YaHei UI", 29, QFont.Weight.Bold))
-    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "译")
+    # Geometric open-book icon also renders on CI's fontless offscreen platform.
+    painter.setBrush(QColor("#f4f6df"))
+    painter.drawRoundedRect(13, 16, 38, 32, 5, 5)
+    painter.setPen(QPen(QColor("#206957"), 3))
+    painter.drawLine(32, 18, 32, 45)
+    for y in (25, 32, 39):
+        painter.drawLine(19, y, 26, y)
+        painter.drawLine(38, y, 45, y)
     painter.end()
     return QIcon(pixmap)
 

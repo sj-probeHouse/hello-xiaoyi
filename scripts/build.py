@@ -10,6 +10,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def build_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    windows = Path(os.environ["SystemRoot"])
+    # Native dependency scanners must not pick same-named DLLs from unrelated apps on PATH.
+    env["PATH"] = os.pathsep.join(
+        str(p)
+        for p in (
+            Path(sys.executable).parent,
+            Path(sys.base_prefix),
+            Path(sys.base_prefix) / "DLLs",
+            windows / "System32",
+            windows,
+        )
+    )
+    return env
+
+
 def main() -> None:
     os.chdir(ROOT)
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -62,6 +79,7 @@ def main() -> None:
             "main.py",
         ],
         check=True,
+        env=build_environment(),
     )
     destination = ROOT / "dist" / "HelloXiaoyi"
     for source in ("README.md", "THIRD_PARTY_NOTICES.md"):
