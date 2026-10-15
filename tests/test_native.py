@@ -97,7 +97,12 @@ def test_system_voice_selection_and_plain_text_playback():
         GetVoices=lambda: [english, chinese], Speak=lambda *args: calls.append(args)
     )
     speech = native.SystemSpeech()
+    assert not speech.is_speaking()
     speech.speaker = speaker
+    speaker.Status = SimpleNamespace(RunningState=2)
+    assert speech.is_speaking()
+    speaker.Status.RunningState = 1
+    assert not speech.is_speaking()
     assert speech.voices() == [("English", "English")]
     speech.play("<word>", "", 20)
     assert speaker.Voice is english

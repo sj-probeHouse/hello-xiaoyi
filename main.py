@@ -14,6 +14,7 @@ def main() -> int:
     from PySide6.QtNetwork import QLocalServer, QLocalSocket
     from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
+    from xiaoyi import __version__
     from xiaoyi.app import Desktop
     from xiaoyi.config import Settings, load_settings
     from xiaoyi.ui import STYLE, app_icon
@@ -63,7 +64,7 @@ def main() -> int:
 
         def finish_smoke():
             report = {
-                "version": "0.1.0",
+                "version": __version__,
                 "qt": qVersion(),
                 "frozen": bool(getattr(sys, "frozen", False)),
                 "tray": desktop.tray.isVisible(),

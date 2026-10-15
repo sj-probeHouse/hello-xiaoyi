@@ -301,3 +301,32 @@ def test_passive_card_hide_keeps_audio_until_explicit_stop(desktop, monkeypatch)
     assert "speech" not in desktop.runner.cancelled[-1:]
     desktop.escape()
     assert desktop.audio_token != token
+
+
+def test_playback_progress_and_system_completion(desktop, monkeypatch):
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    desktop.card.present("word", QPoint(10, 10))
+    desktop.speak("word", Settings())
+    desktop._playback_state(QMediaPlayer.PlaybackState.PlayingState)
+    monkeypatch.setattr(desktop.player, "position", lambda: 2200)
+    monkeypatch.setattr(desktop.player, "duration", lambda: 11400)
+    desktop._audio_progress()
+    assert "00:02 / 00:11" in desktop.card.status.text()
+    desktop.speak("word", replace(Settings(), speech_backend="system"))
+    monkeypatch.setattr(desktop.system, "is_speaking", lambda: False)
+    desktop._audio_progress()
+    assert desktop.card.status.text() == "朗读完成。"
+    assert desktop.card.speak.isEnabled()
+
+
+def test_old_deferred_stop_cannot_cancel_new_speech(desktop):
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    desktop.speak("first", Settings())
+    desktop._playback_state(QMediaPlayer.PlaybackState.PlayingState)
+    desktop._playback_state(QMediaPlayer.PlaybackState.StoppedState)
+    desktop.speak("second", Settings())
+    QTest.qWait(10)
+    assert desktop.audio_session[0] == "second"
+    assert not desktop.card.speak.isEnabled()

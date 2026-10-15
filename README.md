@@ -14,6 +14,8 @@ Windows 全局英译中与英文朗读助手，面向计算机、AI、电子工�
 
 首次自然语音无需 API Key，但需要联网。可在设置中选择英美音色、语速，或改用 Windows 系统英文语音。朗读失败不会自动发送到其他语音服务。
 
+朗读期间，同一段文字的重复请求不会从头重播；卡片显示播放进度及完成／中断状态。卡片被动收起后朗读继续，可按 Esc 或在托盘选择「停止朗读」。点击卡片关闭、暂停取词或激活新选区会停止当前朗读。
+
 ## 配置
 
 | 服务 | Base URL | 默认模型 |
@@ -55,6 +57,6 @@ python -m venv .venv
 .\.venv\Scripts\python.exe scripts/build.py
 ```
 
-便携包输出到 `dist/HelloXiaoyi-0.1.0-windows-x64.zip`。构建会包含独立 Python、Qt 运行时及音频组件，无需用户安装 Python。Windows CI 同样执行测试与打包。
+便携包输出到 `dist/HelloXiaoyi-0.1.1-windows-x64.zip`，程序目录为 `dist/0.1.1/HelloXiaoyi`。构建会包含独立 Python、Qt 运行时及音频组件，无需用户安装 Python。Windows CI 同样执行测试与打包。
 
 项目代码按取词规则、原生接口、网络服务和 Qt 界面组织，无后台服务器与 Agent 依赖。后续功能见 [路线图](docs/ROADMAP.md)。第三方组件许可见 [声明](THIRD_PARTY_NOTICES.md)。

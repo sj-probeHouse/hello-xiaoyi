@@ -33,12 +33,14 @@ def main() -> None:
     sys.path.insert(0, str(ROOT))
     from PySide6.QtWidgets import QApplication
 
+    from xiaoyi import __version__
     from xiaoyi.ui import app_icon
 
     app = QApplication.instance() or QApplication([])
     assets = ROOT / "build" / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     icon = assets / "xiaoyi.ico"
+    output_root = ROOT / "dist" / __version__
     if not app_icon().pixmap(64, 64).save(str(icon)):
         raise RuntimeError("Failed to create Windows icon")
     subprocess.run(
@@ -52,6 +54,8 @@ def main() -> None:
             "--windowed",
             "--name",
             "HelloXiaoyi",
+            "--distpath",
+            str(output_root),
             "--icon",
             str(icon),
             "--hidden-import",
@@ -81,7 +85,7 @@ def main() -> None:
         check=True,
         env=build_environment(),
     )
-    destination = ROOT / "dist" / "HelloXiaoyi"
+    destination = output_root / "HelloXiaoyi"
     for source in ("README.md", "THIRD_PARTY_NOTICES.md"):
         shutil.copy2(ROOT / source, destination / source)
     shutil.copytree(ROOT / "docs", destination / "docs", dirs_exist_ok=True)
@@ -97,7 +101,10 @@ def main() -> None:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, target)
     shutil.make_archive(
-        str(ROOT / "dist" / "HelloXiaoyi-0.1.0-windows-x64"), "zip", ROOT / "dist", "HelloXiaoyi"
+        str(ROOT / "dist" / f"HelloXiaoyi-{__version__}-windows-x64"),
+        "zip",
+        output_root,
+        "HelloXiaoyi",
     )
     # Keep a reference to QApplication until all icon-related operations are complete.
     app.processEvents()
