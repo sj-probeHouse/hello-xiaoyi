@@ -209,7 +209,7 @@ class Desktop:
 
         async def test():
             return await self.runner.translation_service().translate(
-                "attention", settings, key, lambda _: None
+                "attention", settings, key, lambda _: None, use_cache=False
             )
 
         self.runner.submit("test", self.test_token, test)

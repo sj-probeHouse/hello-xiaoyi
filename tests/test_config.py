@@ -49,7 +49,8 @@ def test_invalid_settings_rejected(change):
 
 def test_credentials_roundtrip_isolated_from_real_providers():
     # Uses a dedicated test target, removed in finally. Never reads the user's provider credentials.
-    base = "https://hello-xiaoyi-unit-test.invalid/v1"
+    import uuid
+    base = f"https://hello-xiaoyi-unit-test.invalid/{uuid.uuid4().hex}"
     try:
         set_key(base, "测试-only-not-a-real-api-key")
         assert get_key(base) == "测试-only-not-a-real-api-key"
