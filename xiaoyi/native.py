@@ -212,3 +212,6 @@ class SystemSpeech:
     def stop(self) -> None:
         if self.speaker is not None:
             self.speaker.Speak("", 1 | 2 | 16)
+
+    def is_speaking(self) -> bool:
+        return self.speaker is not None and self.speaker.Status.RunningState == 2

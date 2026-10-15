@@ -74,6 +74,7 @@ class TranslationCard(QWidget):
     retry_requested = Signal()
     settings_requested = Signal()
     dismissed = Signal()
+    auto_hidden = Signal()
 
     def __init__(self):
         super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
@@ -170,10 +171,14 @@ class TranslationCard(QWidget):
         self.dismissed.emit()
         event.ignore()
 
+    def hide_passively(self) -> None:
+        self.hide()
+        self.auto_hidden.emit()
+
     def changeEvent(self, event) -> None:
         if event.type() == QEvent.Type.ActivationChange and not self.isActiveWindow():
             if self.isVisible() and not self.pin.isChecked():
-                self.close()
+                self.hide_passively()
         super().changeEvent(event)
 
 

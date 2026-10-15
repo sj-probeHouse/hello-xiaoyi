@@ -35,6 +35,8 @@ class Desktop:
         self.source_window = 0
         self.translation_started = 0.0
         self.audio_started = 0.0
+        self.audio_session: tuple | None = None
+        self.audio_phase = "idle"
         self.shutting_down = False
         self.health_errors: list[str] = []
         self.runner = AsyncRunner()
@@ -45,12 +47,18 @@ class Desktop:
         self.player.setAudioOutput(self.output)
         self.output.setVolume(1)
         self.player.errorOccurred.connect(self._playback_error)
+        self.player.mediaStatusChanged.connect(self._media_status)
+        self.player.playbackStateChanged.connect(self._playback_state)
         self.card = TranslationCard()
         self.card.speak_requested.connect(lambda: self.speak(self.card.text, self.settings))
         self.card.stop_requested.connect(self.stop_audio)
         self.card.settings_requested.connect(self.show_settings)
         self.card.retry_requested.connect(lambda: self.translate(self.card.text))
         self.card.dismissed.connect(self.dismiss)
+        self.card.auto_hidden.connect(self.cancel_translation)
+        self.audio_timer = QTimer(self.card)
+        self.audio_timer.setInterval(250)
+        self.audio_timer.timeout.connect(self._audio_progress)
         self.window: SettingsWindow | None = None
         self.tray = QSystemTrayIcon(app_icon(), app)
         self.tray.setToolTip("你好，小译 · 已启用 · Ctrl + C C")
@@ -61,6 +69,7 @@ class Desktop:
         self.enabled_action.toggled.connect(self.toggle)
         menu.addAction(self.enabled_action)
         menu.addAction("设置", self.show_settings)
+        menu.addAction("停止朗读", self.stop_audio)
         menu.addSeparator()
         menu.addAction("退出你好，小译", app.quit)
         self.menu = menu
@@ -83,11 +92,12 @@ class Desktop:
             return
         current = foreground()
         if current and current != self.source_window and process_id(current) != os.getpid():
-            self.card.close()
+            self.card.hide_passively()
 
     def escape(self) -> None:
         self.capture_token += 1
-        self.card.close()
+        self.dismiss()
+        self.card.hide()
 
     def _tray_activated(self, reason) -> None:
         if reason in (
@@ -112,7 +122,8 @@ class Desktop:
         else:
             self.hook.enabled.clear()
             self.capture_token += 1
-            self.card.close()
+            self.dismiss()
+            self.card.hide()
         self.enabled_action.setText("已启用全局取词" if enabled else "已暂停全局取词")
         self.tray.setToolTip("你好，小译 · " + ("已启用 · Ctrl + C C" if enabled else "已暂停"))
 
@@ -235,13 +246,28 @@ class Desktop:
     def speak(self, text: str, settings: Settings) -> None:
         if not text:
             return
+        session = (
+            text,
+            settings.speech_backend,
+            settings.voice,
+            settings.rate,
+            settings.system_voice,
+        )
+        if self.audio_session == session:
+            return
         self.stop_audio()
+        self.audio_session = session
+        self.audio_phase = "generating"
+        self.card.speak.setEnabled(False)
         self.audio_started = time.monotonic()
         if settings.speech_backend == "system":
             try:
                 self.system.play(text, settings.system_voice, settings.rate)
+                self.audio_phase = "playing"
+                self.audio_timer.start()
                 self._audio_status("正在使用系统语音朗读。")
             except Exception as exc:
+                self._finish_audio()
                 self._audio_status(
                     str(exc)
                     if isinstance(exc, RuntimeError)
@@ -258,6 +284,8 @@ class Desktop:
 
     def stop_audio(self) -> None:
         self.audio_token += 1
+        was_active = self.audio_session is not None
+        self._finish_audio()
         self.runner.cancel("speech")
         self.player.stop()
         self.player.setSource(QUrl())
@@ -265,6 +293,60 @@ class Desktop:
             self.system.stop()
         except Exception:
             self._audio_status("系统语音停止失败，请退出小译后重新启动。")
+            return
+        if was_active:
+            self._audio_status("朗读已停止。")
+
+    def _finish_audio(self) -> None:
+        self.audio_session = None
+        self.audio_phase = "idle"
+        self.audio_timer.stop()
+        self.card.speak.setEnabled(True)
+
+    def _media_status(self, status) -> None:
+        if self.audio_session and status == QMediaPlayer.MediaStatus.EndOfMedia:
+            self._finish_audio()
+            self._audio_status("朗读完成。")
+
+    def _playback_state(self, state) -> None:
+        if not self.audio_session:
+            return
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.audio_phase = "playing"
+            self.audio_timer.start()
+        elif state == QMediaPlayer.PlaybackState.StoppedState and self.audio_phase == "playing":
+            token = self.audio_token
+
+            def check_stopped():
+                if token != self.audio_token or not self.audio_session:
+                    return
+                # Qt can emit StoppedState before EndOfMedia in the same event loop turn.
+                if self.player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia:
+                    self._media_status(QMediaPlayer.MediaStatus.EndOfMedia)
+                elif self.player.playbackState() == QMediaPlayer.PlaybackState.StoppedState:
+                    self._finish_audio()
+                    self._audio_status("朗读意外中断，请点击朗读重试。")
+
+            QTimer.singleShot(0, check_stopped)
+
+    def _audio_progress(self) -> None:
+        if not self.audio_session or self.audio_phase != "playing":
+            return
+        if self.audio_session[1] == "system":
+            try:
+                if not self.system.is_speaking():
+                    self._finish_audio()
+                    self._audio_status("朗读完成。")
+            except Exception:
+                self.stop_audio()
+                self._audio_status("无法读取系统语音状态，请重新选择英文声音。")
+            return
+        position = self.player.position() // 1000
+        duration = self.player.duration() // 1000
+        self._audio_status(
+            f"正在朗读 {position // 60:02d}:{position % 60:02d}"
+            f" / {duration // 60:02d}:{duration % 60:02d}"
+        )
 
     def _audio_status(self, message: str) -> None:
         if self.card.isVisible():
@@ -273,7 +355,8 @@ class Desktop:
             self.window.status.setText(message)
 
     def _playback_error(self, error, _message: str) -> None:
-        if error != QMediaPlayer.Error.NoError:
+        if self.audio_session and error != QMediaPlayer.Error.NoError:
+            self._finish_audio()
             self._audio_status("音频播放失败，请清理音频缓存后重试，或切换系统语音。")
 
     def clear_audio_cache(self) -> None:
@@ -289,9 +372,12 @@ class Desktop:
 
         self.runner.submit("clear", 0, clear)
 
-    def dismiss(self) -> None:
+    def cancel_translation(self) -> None:
         self.translation_token += 1
         self.runner.cancel("translation")
+
+    def dismiss(self) -> None:
+        self.cancel_translation()
         self.stop_audio()
 
     def _event(self, kind: str, token: int, payload) -> None:
@@ -313,6 +399,7 @@ class Desktop:
                 elapsed = time.monotonic() - self.audio_started
                 self._audio_status(f"正在播放英文 · 音频就绪 {elapsed:.2f} 秒")
             else:
+                self._finish_audio()
                 self._audio_status(payload)
         elif kind.startswith("test:") and token == self.test_token:
             self.window.test_button.setEnabled(True)

@@ -281,7 +281,9 @@ def test_playback_completion_and_unexpected_stop_are_visible(desktop):
     assert desktop.card.speak.isEnabled()
     assert desktop.card.status.text() == "朗读完成。"
     desktop.speak(desktop.card.text, Settings())
+    desktop._playback_state(QMediaPlayer.PlaybackState.PlayingState)
     desktop._playback_state(QMediaPlayer.PlaybackState.StoppedState)
+    QTest.qWait(10)
     assert desktop.card.speak.isEnabled()
     assert "中断" in desktop.card.status.text()
 
