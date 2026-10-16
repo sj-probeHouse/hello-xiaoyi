@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QAction, QCursor
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from .config import DATA_DIR, Settings, get_key, save_settings, set_key, set_startup
@@ -34,7 +34,7 @@ class Desktop:
         self.capture_token = 0
         self.source_window = 0
         self.translation_started = 0.0
-        self.audio_started = 0.0
+        self.audio_resume_position = 0
         self.audio_session: tuple | None = None
         self.audio_phase = "idle"
         self.shutting_down = False
@@ -42,16 +42,13 @@ class Desktop:
         self.runner = AsyncRunner()
         self.runner.event.connect(self._event)
         self.system = SystemSpeech()
-        self.player = QMediaPlayer()
-        self.output = QAudioOutput()
-        self.player.setAudioOutput(self.output)
-        self.output.setVolume(1)
-        self.player.errorOccurred.connect(self._playback_error)
-        self.player.mediaStatusChanged.connect(self._media_status)
-        self.player.playbackStateChanged.connect(self._playback_state)
+        self._replace_player()
+        self.media_devices = QMediaDevices(app)
+        self.media_devices.audioOutputsChanged.connect(self._output_devices_changed)
         self.card = TranslationCard()
         self.card.speak_requested.connect(lambda: self.speak(self.card.text, self.settings))
         self.card.stop_requested.connect(self.stop_audio)
+        self.card.recover_requested.connect(self.recover_audio)
         self.card.settings_requested.connect(self.show_settings)
         self.card.retry_requested.connect(lambda: self.translate(self.card.text))
         self.card.dismissed.connect(self.dismiss)
@@ -86,6 +83,76 @@ class Desktop:
         self.foreground_timer.timeout.connect(self._watch_foreground)
         self.foreground_timer.start()
         app.aboutToQuit.connect(self.shutdown)
+
+    def _replace_player(self) -> None:
+        old_player = getattr(self, "player", None)
+        old_output = getattr(self, "output", None)
+        player = QMediaPlayer()
+        self.player = player
+        self.output = QAudioOutput(QMediaDevices.defaultAudioOutput())
+        player.setAudioOutput(self.output)
+        self.output.setVolume(1)
+        token = self.audio_token
+
+        def current() -> bool:
+            # stop_audio invalidates this binding even while the next MP3 is downloading.
+            return self.player is player and token == self.audio_token
+
+        player.errorOccurred.connect(
+            lambda error, message: self._playback_error(error, message) if current() else None
+        )
+        player.mediaStatusChanged.connect(
+            lambda status: self._media_status(status) if current() else None
+        )
+        player.playbackStateChanged.connect(
+            lambda state: self._playback_state(state) if current() else None
+        )
+        if old_player is not None:
+            old_player.stop()
+            old_player.setAudioOutput(None)
+            old_player.setSource(QUrl())
+            old_player.deleteLater()
+            old_output.deleteLater()
+
+    def recover_audio(self) -> None:
+        if (
+            not self.audio_session
+            or self.audio_session[1] != "online"
+            or self.audio_phase != "playing"
+            or self.player.source().isEmpty()
+        ):
+            return
+        source = self.player.source()
+        position = max(0, self.player.position() - 1000)
+        self._start_playback(source, position)
+
+    def _start_playback(self, source: QUrl, position: int = 0) -> None:
+        self.audio_phase = "generating"
+        self.audio_timer.stop()
+        self.card.recover.setEnabled(False)
+        self._replace_player()
+        if self.output.device().isNull():
+            self._finish_audio()
+            self._audio_status("未找到音频设备，请连接耳机或扬声器后重新朗读。")
+            return
+        self.audio_resume_position = position
+        self.player.setSource(source)
+        if self.audio_session:
+            self._audio_status(f"正在连接音频输出：{self.output.device().description()}")
+
+    def _output_devices_changed(self) -> None:
+        if not self.audio_session or self.audio_session[1] != "online":
+            return
+        if self.audio_phase != "playing":
+            return  # A pending download binds the current device when it is ready.
+        device = self.output.device()
+        available = {bytes(item.id()) for item in QMediaDevices.audioOutputs()}
+        if (
+            bytes(device.id()) not in available
+            or device.id() != QMediaDevices.defaultAudioOutput().id()
+        ):
+            self.stop_audio()
+            self._audio_status("音频设备已断开或切换，请确认耳机连接后重新朗读。")
 
     def _watch_foreground(self) -> None:
         if not self.card.isVisible() or self.card.pin.isChecked() or not self.source_window:
@@ -259,7 +326,6 @@ class Desktop:
         self.audio_session = session
         self.audio_phase = "generating"
         self.card.speak.setEnabled(False)
-        self.audio_started = time.monotonic()
         if settings.speech_backend == "system":
             try:
                 self.system.play(text, settings.system_voice, settings.rate)
@@ -302,8 +368,13 @@ class Desktop:
         self.audio_phase = "idle"
         self.audio_timer.stop()
         self.card.speak.setEnabled(True)
+        self.card.recover.setEnabled(False)
 
     def _media_status(self, status) -> None:
+        if self.audio_session and status == QMediaPlayer.MediaStatus.LoadedMedia:
+            # Seeking before LoadedMedia can be silently ignored by the backend.
+            self.player.setPosition(self.audio_resume_position)
+            self.player.play()
         if self.audio_session and status == QMediaPlayer.MediaStatus.EndOfMedia:
             self._finish_audio()
             self._audio_status("朗读完成。")
@@ -313,12 +384,14 @@ class Desktop:
             return
         if state == QMediaPlayer.PlaybackState.PlayingState:
             self.audio_phase = "playing"
+            self.card.recover.setEnabled(True)
             self.audio_timer.start()
         elif state == QMediaPlayer.PlaybackState.StoppedState and self.audio_phase == "playing":
             token = self.audio_token
+            player = self.player
 
             def check_stopped():
-                if token != self.audio_token or not self.audio_session:
+                if token != self.audio_token or self.player is not player or not self.audio_session:
                     return
                 # Qt can emit StoppedState before EndOfMedia in the same event loop turn.
                 if self.player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia:
@@ -346,6 +419,7 @@ class Desktop:
         self._audio_status(
             f"正在朗读 {position // 60:02d}:{position % 60:02d}"
             f" / {duration // 60:02d}:{duration % 60:02d}"
+            f" · 输出：{self.output.device().description()}"
         )
 
     def _audio_status(self, message: str) -> None:
@@ -394,10 +468,7 @@ class Desktop:
                 self.card.error(payload)
         elif kind.startswith("speech:") and token == self.audio_token:
             if kind.endswith("done"):
-                self.player.setSource(QUrl.fromLocalFile(str(payload)))
-                self.player.play()
-                elapsed = time.monotonic() - self.audio_started
-                self._audio_status(f"正在播放英文 · 音频就绪 {elapsed:.2f} 秒")
+                self._start_playback(QUrl.fromLocalFile(str(payload)))
             else:
                 self._finish_audio()
                 self._audio_status(payload)
@@ -419,4 +490,8 @@ class Desktop:
         self.hook.stop()
         self.stop_audio()
         self.runner.stop()
+        self.media_devices.audioOutputsChanged.disconnect(self._output_devices_changed)
+        self.media_devices.deleteLater()
+        self.player.deleteLater()
+        self.output.deleteLater()
         self.tray.hide()

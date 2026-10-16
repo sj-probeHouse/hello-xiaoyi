@@ -7,6 +7,21 @@ from xiaoyi.config import Settings
 from xiaoyi.services import ServiceError, synthesize
 
 
+def test_upgrade_removes_only_old_audio_cache(tmp_path):
+    from xiaoyi.services import prepare_audio_cache
+
+    (tmp_path / "old.mp3").write_bytes(b"old")
+    (tmp_path / "old.part").write_bytes(b"partial")
+    (tmp_path / "settings.json").write_text("keep", encoding="utf-8")
+    prepare_audio_cache(tmp_path)
+    assert not (tmp_path / "old.mp3").exists()
+    assert not (tmp_path / "old.part").exists()
+    assert (tmp_path / "settings.json").read_text() == "keep"
+    (tmp_path / "current.mp3").write_bytes(b"current")
+    prepare_audio_cache(tmp_path)
+    assert (tmp_path / "current.mp3").exists()
+
+
 def test_audio_cache_keys_and_cleanup(tmp_path, monkeypatch):
     calls = []
 
@@ -54,6 +69,7 @@ def test_speech_failure_or_cancellation_leaves_no_partial_file(tmp_path, monkeyp
     async def run():
         with pytest.raises(asyncio.CancelledError if cancel else ServiceError):
             await synthesize("word", Settings(), tmp_path)
-        assert not list(tmp_path.iterdir())
+        assert not list(tmp_path.glob("*.mp3"))
+        assert not list(tmp_path.glob("*.part"))
 
     asyncio.run(run())

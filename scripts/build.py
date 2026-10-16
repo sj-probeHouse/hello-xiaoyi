@@ -40,7 +40,7 @@ def main() -> None:
     assets = ROOT / "build" / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     icon = assets / "xiaoyi.ico"
-    output_root = ROOT / "dist" / __version__
+    output_root = ROOT / "dist"
     if not app_icon().pixmap(64, 64).save(str(icon)):
         raise RuntimeError("Failed to create Windows icon")
     subprocess.run(

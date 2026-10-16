@@ -11,6 +11,7 @@ from pathlib import Path
 import edge_tts
 import httpx
 
+from . import __version__
 from .config import Settings
 from .core import translation_prompt
 
@@ -127,8 +128,23 @@ class TranslationService:
         return result
 
 
-async def synthesize(text: str, settings: Settings, folder: Path) -> Path:
+def prepare_audio_cache(folder: Path) -> None:
+    """Discard prior-release audio, leaving preferences and credentials untouched."""
     folder.mkdir(parents=True, exist_ok=True)
+    marker = folder / ".version"
+    if marker.exists() and marker.read_text(encoding="utf-8") == __version__:
+        return
+    for path in folder.iterdir():
+        if path.is_file() and path.suffix in {".mp3", ".part"}:
+            path.unlink()
+    marker.write_text(__version__, encoding="utf-8")
+
+
+async def synthesize(text: str, settings: Settings, folder: Path) -> Path:
+    try:
+        prepare_audio_cache(folder)
+    except OSError as exc:
+        raise ServiceError("无法清理旧版音频缓存，请退出其他小译实例后重试。") from exc
     digest = hashlib.sha256(f"{settings.voice}|{settings.rate}|{text}".encode()).hexdigest()
     path = folder / f"{digest}.mp3"
     if path.exists() and path.stat().st_size:

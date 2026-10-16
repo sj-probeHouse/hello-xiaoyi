@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import __version__
 from .config import PRESETS, Settings, get_key
 
 STYLE = """
@@ -71,6 +72,7 @@ def app_icon() -> QIcon:
 class TranslationCard(QWidget):
     speak_requested = Signal()
     stop_requested = Signal()
+    recover_requested = Signal()
     retry_requested = Signal()
     settings_requested = Signal()
     dismissed = Signal()
@@ -133,6 +135,11 @@ class TranslationCard(QWidget):
         for button in (self.speak, stop, self.copy, self.retry):
             actions.addWidget(button)
         layout.addLayout(actions)
+        self.recover = QPushButton("计时但无声？恢复声音")
+        self.recover.setEnabled(False)
+        self.recover.setToolTip("重新连接当前输出设备，从当前位置前 1 秒继续播放")
+        self.recover.clicked.connect(self.recover_requested)
+        layout.addWidget(self.recover)
         QShortcut(QKeySequence("Escape"), self, activated=self.close)
 
     def present(self, text: str, point: QPoint) -> None:
@@ -192,7 +199,7 @@ class SettingsWindow(QWidget):
     def __init__(self, settings: Settings, system_voices: list[tuple[str, str]]):
         super().__init__()
         self.setObjectName("settings")
-        self.setWindowTitle("你好，小译 / HELLO XIAOYI · 设置")
+        self.setWindowTitle(f"你好，小译 / HELLO XIAOYI · {__version__} · 设置")
         self.setWindowIcon(app_icon())
         self.setMinimumWidth(620)
         self.current = replace(settings)

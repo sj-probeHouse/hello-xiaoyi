@@ -330,3 +330,91 @@ def test_old_deferred_stop_cannot_cancel_new_speech(desktop):
     QTest.qWait(10)
     assert desktop.audio_session[0] == "second"
     assert not desktop.card.speak.isEnabled()
+
+
+def test_recover_audio_replaces_output_and_keeps_current_file(desktop, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from PySide6.QtCore import QUrl
+    from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+
+    def output(*args):
+        item = QAudioOutput()
+        monkeypatch.setattr(
+            item,
+            "device",
+            lambda: SimpleNamespace(isNull=lambda: False, description=lambda: "test"),
+        )
+        return item
+
+    monkeypatch.setattr("xiaoyi.app.QAudioOutput", output)
+    seeks = []
+    monkeypatch.setattr(QMediaPlayer, "setPosition", lambda self, value: seeks.append(value))
+    monkeypatch.setattr(QMediaPlayer, "play", lambda self: None)
+
+    desktop.card.present("MDP instantiation. Let Ht denote the harness.", QPoint(10, 10))
+    desktop.speak(desktop.card.text, Settings())
+    desktop._playback_state(QMediaPlayer.PlaybackState.PlayingState)
+    source = QUrl.fromLocalFile(str(tmp_path / "speech.mp3"))
+    old_player, old_output = desktop.player, desktop.output
+    monkeypatch.setattr(old_player, "source", lambda: source)
+    monkeypatch.setattr(old_player, "position", lambda: 3200)
+    submitted = len(desktop.runner.submitted)
+    desktop.recover_audio()
+    assert desktop.player is not old_player
+    assert desktop.output is not old_output
+    assert desktop.player.source() == source
+    desktop.player.mediaStatusChanged.emit(QMediaPlayer.MediaStatus.LoadedMedia)
+    assert seeks == [2200]
+    assert len(desktop.runner.submitted) == submitted
+    assert desktop.audio_session is not None
+    # An old backend can still emit queued signals after it was detached.
+    old_player.mediaStatusChanged.emit(QMediaPlayer.MediaStatus.EndOfMedia)
+    old_player.errorOccurred.emit(QMediaPlayer.Error.ResourceError, "old error")
+    assert desktop.audio_session is not None
+
+
+def test_recovery_is_unavailable_before_audio_or_for_system_voice(desktop):
+    assert not desktop.card.recover.isEnabled()
+    desktop.speak("word", Settings())
+    player = desktop.player
+    desktop.recover_audio()
+    assert desktop.player is player
+    desktop.speak("word", replace(Settings(), speech_backend="system"))
+    desktop.recover_audio()
+    assert desktop.player is player
+    assert not desktop.card.recover.isEnabled()
+
+
+def test_output_change_stops_audio_with_actionable_message(desktop, monkeypatch):
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    desktop.card.present("word", QPoint(10, 10))
+    desktop.speak("word", Settings())
+    desktop._playback_state(QMediaPlayer.PlaybackState.PlayingState)
+    monkeypatch.setattr("xiaoyi.app.QMediaDevices.audioOutputs", lambda: [])
+    desktop._output_devices_changed()
+    assert desktop.audio_session is None
+    assert "音频设备" in desktop.card.status.text()
+    assert desktop.card.speak.isEnabled()
+
+
+@pytest.mark.parametrize("event", ["end", "error", "loaded", "playing"])
+@pytest.mark.parametrize("backend", ["online", "system"])
+def test_previous_player_events_do_not_affect_new_synthesis(desktop, event, backend):
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    desktop.speak("first", Settings())
+    previous = desktop.player
+    desktop.speak("second", replace(Settings(), speech_backend=backend))
+    if event == "end":
+        previous.mediaStatusChanged.emit(QMediaPlayer.MediaStatus.EndOfMedia)
+    elif event == "error":
+        previous.errorOccurred.emit(QMediaPlayer.Error.ResourceError, "late error")
+    elif event == "loaded":
+        previous.mediaStatusChanged.emit(QMediaPlayer.MediaStatus.LoadedMedia)
+    else:
+        previous.playbackStateChanged.emit(QMediaPlayer.PlaybackState.PlayingState)
+    assert desktop.audio_session[0] == "second"
+    assert desktop.audio_phase == ("generating" if backend == "online" else "playing")
+    assert not desktop.card.speak.isEnabled()

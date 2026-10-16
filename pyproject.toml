@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hello-xiaoyi"
-version = "0.1.1"
+version = "0.1.2"
 description = "你好，小译 — Windows 全局英译中与英文朗读助手"
 requires-python = ">=3.12"
 dependencies = [

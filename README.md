@@ -18,6 +18,8 @@ Windows 全局英译中与英文朗读助手，面向计算机、AI、电子工�
 
 朗读期间，同一段文字的重复请求不会从头重播；卡片显示播放进度及完成／中断状态。卡片被动收起后朗读继续，可按 Esc 或在托盘选择「停止朗读」。点击卡片关闭、暂停取词或激活新选区会停止当前朗读。
 
+卡片会显示当前音频输出设备。若计时仍走但没有声音，点击「计时但无声？恢复声音」重新连接当前输出设备，从当前位置前 1 秒继续；不重新请求翻译或合成。设备断开或默认输出切换时会停播并提示重新朗读。若 Windows 已向耳机输出信号但耳机仍无声，需对照其他耳机／扬声器排查设备端。
+
 ## 配置
 
 | 服务 | Base URL | 默认模型 |
@@ -59,6 +61,6 @@ python -m venv .venv
 .\.venv\Scripts\python.exe scripts/build.py
 ```
 
-便携包输出到 `dist/HelloXiaoyi-0.1.1-windows-x64.zip`，程序目录为 `dist/0.1.1/HelloXiaoyi`。构建会包含独立 Python、Qt 运行时及音频组件，无需用户安装 Python。Windows CI 同样执行测试与打包。
+便携包输出到 `dist/HelloXiaoyi-0.1.2-windows-x64.zip`，程序固定为 `dist/HelloXiaoyi/HelloXiaoyi.exe`。开发期直接覆盖此位置，构建前先退出小译；交付后清除旧程序目录、旧 ZIP 和旧音频缓存，不保留本地旧版本。新版首次生成语音时也会按版本自动清理旧音频缓存，设置与密钥保持不变。构建包含独立 Python、Qt 运行时及音频组件，无需用户安装 Python。Windows CI 同样执行测试与打包。
 
 项目代码按取词规则、原生接口、网络服务和 Qt 界面组织，无后台服务器与 Agent 依赖。后续功能见 [路线图](docs/ROADMAP.md)。第三方组件许可见 [声明](THIRD_PARTY_NOTICES.md)。
