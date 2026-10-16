@@ -9,7 +9,15 @@ from PySide6.QtGui import QAction, QCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from .config import DATA_DIR, Settings, get_key, save_settings, set_key, set_startup
+from .config import (
+    DATA_DIR,
+    Settings,
+    get_key,
+    save_settings,
+    set_key,
+    set_startup,
+    validate_api_key,
+)
 from .core import capture_is_fresh, normalize_text
 from .native import (
     KeyboardHook,
@@ -215,6 +223,7 @@ class Desktop:
     def save(self, settings: Settings, key: str) -> None:
         try:
             settings.validate()
+            validate_api_key(settings.base_url, key)
             set_key(settings.base_url, key)
             set_startup(settings.startup)
             save_settings(settings)

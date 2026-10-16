@@ -9,12 +9,33 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from urllib.parse import urlsplit
 
+MIMO_TOKEN_PRESETS = {
+    "MiMo Token Plan · 中国": "https://token-plan-cn.xiaomimimo.com/v1",
+    "MiMo Token Plan · 新加坡": "https://token-plan-sgp.xiaomimimo.com/v1",
+    "MiMo Token Plan · 欧洲": "https://token-plan-ams.xiaomimimo.com/v1",
+}
+MIMO_PROVIDERS = {"MiMo", *MIMO_TOKEN_PRESETS}
 PRESETS = {
     "DeepSeek": ("https://api.deepseek.com", "deepseek-flash"),
     "MiMo": ("https://api.xiaomimimo.com/v1", "mimo-v2.6-flash"),
+    **{name: (url, "mimo-v2.6-flash") for name, url in MIMO_TOKEN_PRESETS.items()},
     "自定义": ("", ""),
 }
 DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "HelloXiaoyi"
+
+
+def validate_api_key(base_url: str, key: str) -> None:
+    """Reject known configuration mistakes locally without displaying the credential."""
+    if key.lower().startswith(("mimokey:", "mimokey：")):
+        raise ValueError("API Key 只填写密钥本身，请去掉 MiMokey: 标签后重试。")
+    if any(character.isspace() for character in key):
+        raise ValueError("API Key 中不能包含空格或换行，请从控制台重新复制密钥。")
+    host = urlsplit(base_url).hostname
+    if host == "api.xiaomimimo.com" and key.startswith(("tp-", "ttp-")):
+        raise ValueError("这是 Token Plan 密钥，请选择对应区域的 MiMo Token Plan 地址。")
+    token_hosts = {urlsplit(url).hostname for url in MIMO_TOKEN_PRESETS.values()}
+    if host in token_hosts and key.startswith("sk-"):
+        raise ValueError("这是按量付费密钥，请选择 MiMo · 按量付费及对应地址。")
 
 
 @dataclass

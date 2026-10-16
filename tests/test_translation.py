@@ -1,11 +1,65 @@
 import asyncio
 import json
+from dataclasses import replace
 
 import httpx
 import pytest
 
 from xiaoyi.config import Settings
 from xiaoyi.services import ServiceError, TranslationService
+
+
+@pytest.mark.parametrize("region", ["中国", "新加坡", "欧洲"])
+def test_token_plan_uses_own_endpoint_and_mimo_auth(region):
+    from xiaoyi.config import PRESETS
+
+    provider = f"MiMo Token Plan · {region}"
+    base, model = PRESETS[provider]
+
+    async def run():
+        requests = []
+
+        def handle(request):
+            requests.append(request)
+            return stream_response()
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            settings = replace(Settings(), provider=provider, base_url=base, model=model)
+            await TranslationService(client).translate(
+                "word", settings, "tp-example", lambda _: None
+            )
+        assert str(requests[0].url) == base + "/chat/completions"
+        assert requests[0].headers["api-key"] == "tp-example"
+        assert "authorization" not in requests[0].headers
+        assert json.loads(requests[0].content)["thinking"] == {"type": "disabled"}
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "base,key,hint",
+    [
+        ("https://api.xiaomimimo.com/v1", "tp-example", "Token Plan"),
+        ("https://api.xiaomimimo.com/v1", "ttp-example", "Token Plan"),
+        ("https://token-plan-cn.xiaomimimo.com/v1", "sk-example", "按量"),
+        ("https://token-plan-sgp.xiaomimimo.com/v1", "sk-example", "按量"),
+        ("https://token-plan-ams.xiaomimimo.com/v1", "sk-example", "按量"),
+        ("https://token-plan-cn.xiaomimimo.com/v1", "MiMokey:tp-example", "MiMokey"),
+        ("https://token-plan-cn.xiaomimimo.com/v1", "tp-exam ple", "空格"),
+    ],
+)
+def test_bad_key_configuration_is_rejected_without_sending(base, key, hint):
+    async def run():
+        requests = []
+        transport = httpx.MockTransport(lambda r: requests.append(r) or stream_response())
+        async with httpx.AsyncClient(transport=transport) as client:
+            settings = replace(Settings(), provider="MiMo", base_url=base)
+            with pytest.raises(ServiceError, match=hint) as caught:
+                await TranslationService(client).translate("word", settings, key, lambda _: None)
+        assert not requests
+        assert key not in str(caught.value)
+
+    asyncio.run(run())
 
 
 def stream_response(text="注意力"):

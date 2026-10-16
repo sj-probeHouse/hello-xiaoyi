@@ -46,7 +46,7 @@ def test_settings_form_and_preview_without_translation_key(qapp, monkeypatch):
     window.test_requested.connect(lambda settings, key: tested.append((settings, key)))
     window.preview_requested.connect(previews.append)
     window.show()
-    window.provider.setCurrentText("MiMo")
+    window.provider.setCurrentText("MiMo · 按量付费")
     assert window.model.text() == "mimo-v2.6-flash"
     assert window.base.text() == "https://api.xiaomimimo.com/v1"
     window.key.setText("test-key")
@@ -65,6 +65,63 @@ def test_settings_form_and_preview_without_translation_key(qapp, monkeypatch):
     assert previews[0].speech_backend == "system"
     window.close()
     assert not window.isVisible()
+    window.deleteLater()
+
+
+def test_mimo_plan_selection_and_key_validation(qapp, monkeypatch):
+    monkeypatch.setattr("xiaoyi.ui.get_key", lambda _: "")
+    window = SettingsWindow(Settings(), [])
+    tested, saved = [], []
+    window.test_requested.connect(lambda *args: tested.append(args))
+    window.save_requested.connect(lambda *args: saved.append(args))
+    window.provider.setCurrentText("MiMo Token Plan · 中国")
+    assert window.base.text() == "https://token-plan-cn.xiaomimimo.com/v1"
+    window.key.setText("MiMokey:tp-example")
+    window._test()
+    window._save()
+    assert not tested and not saved
+    assert "MiMokey" in window.status.text()
+    window.key.setText("tp-example")
+    window.base.editingFinished.emit()  # Visiting an unchanged URL must not erase a pasted key.
+    assert window.key.text() == "tp-example"
+    window._test()
+    assert tested[0][0].provider == "MiMo Token Plan · 中国"
+    assert tested[0][1] == "tp-example"
+    window.deleteLater()
+
+
+def test_legacy_mimo_with_token_plan_url_keeps_configuration(qapp, monkeypatch):
+    monkeypatch.setattr("xiaoyi.ui.get_key", lambda _: "tp-example")
+    settings = replace(
+        Settings(),
+        provider="MiMo",
+        base_url="https://token-plan-sgp.xiaomimimo.com/v1",
+        model="my-configured-model",
+    )
+    window = SettingsWindow(settings, [])
+    assert window.provider.currentText() == "MiMo Token Plan · 新加坡"
+    assert window.snapshot().base_url == settings.base_url
+    assert window.snapshot().model == settings.model
+    assert window.key.text() == "tp-example"
+    window.deleteLater()
+
+
+def test_failed_key_lookup_does_not_prevent_restoring_previous_credentials(qapp, monkeypatch):
+    original = Settings().base_url
+
+    def lookup(base):
+        if base == original:
+            return "saved-example"
+        raise RuntimeError("credential error")
+
+    monkeypatch.setattr("xiaoyi.ui.get_key", lookup)
+    window = SettingsWindow(Settings(), [])
+    window.base.setText("https://other.invalid")
+    window._load_key()
+    assert not window.key.text()
+    window.base.setText(original)
+    window._load_key()
+    assert window.key.text() == "saved-example"
     window.deleteLater()
 
 

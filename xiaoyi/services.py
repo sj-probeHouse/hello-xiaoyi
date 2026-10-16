@@ -12,7 +12,7 @@ import edge_tts
 import httpx
 
 from . import __version__
-from .config import Settings
+from .config import MIMO_PROVIDERS, Settings, validate_api_key
 from .core import translation_prompt
 
 
@@ -37,6 +37,10 @@ class TranslationService:
         if not key:
             raise ServiceError("尚未配置 API 密钥，请打开设置填写并测试连接。")
         settings.validate()
+        try:
+            validate_api_key(settings.base_url, key)
+        except ValueError as exc:
+            raise ServiceError(str(exc)) from exc
         cache_key = (
             settings.provider,
             settings.base_url,
@@ -57,10 +61,10 @@ class TranslationService:
                 {"role": "user", "content": text},
             ],
         }
-        if settings.provider in {"DeepSeek", "MiMo"}:
+        if settings.provider == "DeepSeek" or settings.provider in MIMO_PROVIDERS:
             payload["thinking"] = {"type": "disabled"}
         headers = {"Authorization": f"Bearer {key}"}
-        if settings.provider == "MiMo":
+        if settings.provider in MIMO_PROVIDERS:
             headers = {"api-key": key}
         parts = []
         completed = False

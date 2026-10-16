@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
-from .config import PRESETS, Settings, get_key
+from .config import MIMO_TOKEN_PRESETS, PRESETS, Settings, get_key, validate_api_key
 
 STYLE = """
 QWidget { font-family: 'Microsoft YaHei UI', 'Segoe UI'; font-size: 10pt; color: #203936; }
@@ -203,6 +203,7 @@ class SettingsWindow(QWidget):
         self.setWindowIcon(app_icon())
         self.setMinimumWidth(620)
         self.current = replace(settings)
+        self._key_base: str | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(26, 24, 26, 20)
         header = QFrame()
@@ -221,8 +222,20 @@ class SettingsWindow(QWidget):
         form = QFormLayout()
         form.setVerticalSpacing(10)
         self.provider = QComboBox()
-        self.provider.addItems(PRESETS)
-        self.provider.setCurrentText(settings.provider)
+        for provider in PRESETS:
+            self.provider.addItem("MiMo · 按量付费" if provider == "MiMo" else provider, provider)
+        provider = settings.provider
+        if provider == "MiMo":
+            provider = next(
+                (
+                    name
+                    for name, url in MIMO_TOKEN_PRESETS.items()
+                    if url == settings.base_url.rstrip("/")
+                ),
+                provider,
+            )
+        index = self.provider.findData(provider)
+        self.provider.setCurrentIndex(index if index >= 0 else self.provider.findData("自定义"))
         form.addRow("翻译服务", self.provider)
         self.base = QLineEdit(settings.base_url)
         self.base.setPlaceholderText("https://…（填写基础地址，不含 /chat/completions）")
@@ -233,6 +246,13 @@ class SettingsWindow(QWidget):
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         self.key.setPlaceholderText("保存在 Windows 凭据管理器；清空后保存可删除")
         form.addRow("API Key", self.key)
+        key_hint = QLabel(
+            "MiMo：sk- 对应按量付费；tp- / ttp- 对应 Token Plan。\n"
+            "先选控制台对应区域，再粘贴密钥；不要带 MiMokey: 标签。"
+        )
+        key_hint.setWordWrap(True)
+        key_hint.setObjectName("caption")
+        form.addRow("", key_hint)
         self.domain = QLineEdit(settings.domain)
         form.addRow("术语领域", self.domain)
         self.backend = QComboBox()
@@ -304,7 +324,7 @@ class SettingsWindow(QWidget):
         save.clicked.connect(self._save)
         bottom.addWidget(save)
         layout.addLayout(bottom)
-        self.provider.currentTextChanged.connect(self._provider_changed)
+        self.provider.currentIndexChanged.connect(self._provider_changed)
         self.base.editingFinished.connect(self._load_key)
         self.backend.currentIndexChanged.connect(self._backend_changed)
         self._backend_changed()
@@ -315,22 +335,27 @@ class SettingsWindow(QWidget):
         self.voice.setEnabled(online)
         self.system_voice.setEnabled(not online)
 
-    def _provider_changed(self, provider: str) -> None:
-        base, model = PRESETS[provider]
+    def _provider_changed(self, _index: int) -> None:
+        base, model = PRESETS[self.provider.currentData()]
         self.base.setText(base)
         self.model.setText(model)
         self._load_key()
 
     def _load_key(self) -> None:
+        base = self.base.text().strip().rstrip("/")
+        if base == self._key_base:
+            return
         try:
-            self.key.setText(get_key(self.base.text().strip()))
+            self.key.setText(get_key(base))
+            self._key_base = base
         except RuntimeError as exc:
+            self._key_base = None
             self.key.clear()
             self.status.setText(str(exc))
 
     def snapshot(self) -> Settings:
         settings = Settings(
-            provider=self.provider.currentText(),
+            provider=self.provider.currentData(),
             base_url=self.base.text().strip().rstrip("/"),
             model=self.model.text().strip(),
             domain=self.domain.text().strip(),
@@ -345,15 +370,22 @@ class SettingsWindow(QWidget):
 
     def _save(self) -> None:
         try:
-            self.save_requested.emit(self.snapshot(), self.key.text().strip())
+            settings, key = self._validated_credentials()
+            self.save_requested.emit(settings, key)
         except ValueError as exc:
             self.status.setText(str(exc))
 
     def _test(self) -> None:
         try:
-            self.test_requested.emit(self.snapshot(), self.key.text().strip())
+            settings, key = self._validated_credentials()
+            self.test_requested.emit(settings, key)
         except ValueError as exc:
             self.status.setText(str(exc))
+
+    def _validated_credentials(self) -> tuple[Settings, str]:
+        settings, key = self.snapshot(), self.key.text().strip()
+        validate_api_key(settings.base_url, key)
+        return settings, key
 
     def _preview(self) -> None:
         # Voice preview works before a translation key/base URL has been configured.
